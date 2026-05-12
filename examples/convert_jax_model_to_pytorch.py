@@ -532,13 +532,25 @@ def convert_pi0_checkpoint(
     # Save model weights as SafeTensors using save_model to handle tied weights
     safetensors.torch.save_model(pi0_model, os.path.join(output_path, "model.safetensors"))
 
-    # Copy assets folder if it exists
-    assets_source = pathlib.Path(checkpoint_dir).parent / "assets"
-    if assets_source.exists():
-        assets_dest = pathlib.Path(output_path) / "assets"
-        if assets_dest.exists():
-            shutil.rmtree(assets_dest)
-        shutil.copytree(assets_source, assets_dest)
+    # Copy assets folder if it exists. The standard openpi training layout
+    # nests the checkpoint as <exp>/<step>/params/ with a sibling <exp>/assets/,
+    # but the openpi-assets pre-trained layout puts assets/ INSIDE the checkpoint
+    # dir alongside params/. Try the inside-the-dir layout first (it's the one
+    # the policy server expects to find at <output_path>/assets/...) and fall
+    # back to the parent layout.
+    ckpt_path = pathlib.Path(checkpoint_dir)
+    assets_dest = pathlib.Path(output_path) / "assets"
+    for candidate in (ckpt_path / "assets", ckpt_path.parent / "assets"):
+        if candidate.exists():
+            if assets_dest.exists():
+                shutil.rmtree(assets_dest)
+            shutil.copytree(candidate, assets_dest)
+            print(f"Copied assets from {candidate} -> {assets_dest}")
+            break
+    else:
+        print(f"WARNING: no assets/ folder found next to or inside {ckpt_path}; "
+              "the served policy will fail to load norm_stats. You can copy it "
+              "manually from the source checkpoint.")
 
     # Save config as JSON for reference
     config_dict = {

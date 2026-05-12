@@ -426,8 +426,15 @@ class PI0Pytorch(nn.Module):
         past_key_values,
         x_t,
         timestep,
+        *,
+        attentions_out: list | None = None,
     ):
-        """Apply one denoising step of the noise `x_t` at a given timestep."""
+        """Apply one denoising step of the noise `x_t` at a given timestep.
+
+        When ``attentions_out`` is a list, every per-layer attention tensor of the
+        action-expert forward pass (shape ``(B, H, suffix_len, prefix_len + suffix_len)``)
+        is appended to it. Default ``None`` keeps the original lossless behaviour.
+        """
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, timestep)
 
         suffix_len = suffix_pad_masks.shape[1]
@@ -454,9 +461,86 @@ class PI0Pytorch(nn.Module):
             inputs_embeds=[None, suffix_embs],
             use_cache=False,
             adarms_cond=[None, adarms_cond],
+            attentions_out=attentions_out,
         )
 
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.action_horizon :]
         suffix_out = suffix_out.to(dtype=torch.float32)
         return self.action_out_proj(suffix_out)
+
+    @torch.no_grad()
+    def sample_actions_with_attention(
+        self,
+        device,
+        observation,
+        noise=None,
+        num_steps: int = 10,
+    ) -> dict:
+        """Run inference and additionally collect attention probabilities for visualisation.
+
+        The returned dict contains:
+          - ``actions``: same tensor that ``sample_actions`` would have returned.
+          - ``prefix_attentions``: list of ``num_layers`` tensors, each of shape
+            ``(B, H, prefix_len, prefix_len)`` capturing PaliGemma's bidirectional
+            attention over (image + text [+state-for-pi0]) tokens.
+          - ``suffix_attentions_per_step``: outer list = flow-matching denoise step,
+            inner list = per-layer attention tensor of shape
+            ``(B, H, suffix_len, prefix_len + suffix_len)``.
+
+        Tensors are detached and live on whichever device the forward computed
+        them on; callers usually move them to CPU before doing slicing in numpy.
+        Calling this method instead of ``sample_actions`` increases peak memory
+        roughly proportionally to ``num_layers * H * (prefix_len^2 + num_steps * suffix_len * (prefix_len + suffix_len))``.
+        """
+        bsize = observation.state.shape[0]
+        if noise is None:
+            actions_shape = (bsize, self.config.action_horizon, self.config.action_dim)
+            noise = self.sample_noise(actions_shape, device)
+
+        images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=False)
+
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+
+        prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
+        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
+
+        prefix_attentions: list = []
+        _, past_key_values = self.paligemma_with_expert.forward(
+            attention_mask=prefix_att_2d_masks_4d,
+            position_ids=prefix_position_ids,
+            past_key_values=None,
+            inputs_embeds=[prefix_embs, None],
+            use_cache=True,
+            attentions_out=prefix_attentions,
+        )
+
+        dt = -1.0 / num_steps
+        dt = torch.tensor(dt, dtype=torch.float32, device=device)
+
+        suffix_attentions_per_step: list[list] = []
+
+        x_t = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        while time >= -dt / 2:
+            expanded_time = time.expand(bsize)
+            per_step_attentions: list = []
+            v_t = self.denoise_step(
+                state,
+                prefix_pad_masks,
+                past_key_values,
+                x_t,
+                expanded_time,
+                attentions_out=per_step_attentions,
+            )
+            suffix_attentions_per_step.append(per_step_attentions)
+            x_t = x_t + dt * v_t
+            time += dt
+
+        return {
+            "actions": x_t,
+            "prefix_attentions": prefix_attentions,
+            "suffix_attentions_per_step": suffix_attentions_per_step,
+        }

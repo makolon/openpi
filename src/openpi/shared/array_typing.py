@@ -26,21 +26,36 @@ import torch
 # the problem is that custom PyTree nodes are sometimes initialized with arbitrary types (e.g., `jax.ShapeDtypeStruct`,
 # `jax.Sharding`, or even <object>) due to JAX tracing operations. this patch skips typechecking when the stack trace
 # contains `jax._src.tree_util`, which should only be the case during tree unflattening.
-_original_check_dataclass_annotations = jaxtyping._decorator._check_dataclass_annotations  # noqa: SLF001
+#
+# The patch references a *private* attribute on jaxtyping._decorator that has been renamed/removed in newer
+# jaxtyping releases. We pin jaxtyping==0.2.36 in our pyproject, but downstream consumers (e.g. polaris_real2sim)
+# may end up resolving a different version. Make the monkey-patch a no-op when the attribute is missing rather
+# than failing at import time.
+_original_check_dataclass_annotations = getattr(
+    jaxtyping._decorator, "_check_dataclass_annotations", None  # noqa: SLF001
+)
 # Redefine Array to include both JAX arrays and PyTorch tensors
 Array = jax.Array | torch.Tensor
 
 
-def _check_dataclass_annotations(self, typechecker):
-    if not any(
-        frame.frame.f_globals.get("__name__") in {"jax._src.tree_util", "flax.nnx.transforms.compilation"}
-        for frame in inspect.stack()
-    ):
-        return _original_check_dataclass_annotations(self, typechecker)
-    return None
+if _original_check_dataclass_annotations is not None:
 
+    def _check_dataclass_annotations(self, typechecker):
+        if not any(
+            frame.frame.f_globals.get("__name__") in {"jax._src.tree_util", "flax.nnx.transforms.compilation"}
+            for frame in inspect.stack()
+        ):
+            return _original_check_dataclass_annotations(self, typechecker)
+        return None
 
-jaxtyping._decorator._check_dataclass_annotations = _check_dataclass_annotations  # noqa: SLF001
+    jaxtyping._decorator._check_dataclass_annotations = _check_dataclass_annotations  # noqa: SLF001
+else:
+    import logging as _logging
+
+    _logging.getLogger("openpi").debug(
+        "jaxtyping._decorator._check_dataclass_annotations is missing in this jaxtyping version; "
+        "skipping the openpi monkey-patch (typecheck behaviour during tree unflattening may differ)."
+    )
 
 KeyArrayLike: TypeAlias = jax.typing.ArrayLike
 Params: TypeAlias = PyTree[Float[ArrayLike, "..."]]

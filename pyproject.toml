@@ -13,11 +13,17 @@ dependencies = [
     "flatbuffers>=24.3.25",
     "flax==0.10.2",
     "fsspec[gcs]>=2024.6.0",
-    "gym-aloha>=0.1.1",
+    # gym-aloha and lerobot are training/benchmark-only deps. Both pin
+    # gymnasium==0.29.1 transitively, which conflicts with the parent
+    # project's isaaclab==2.3.2 (gymnasium==1.2.0). polaris only uses
+    # openpi.models_pytorch.attention_utils and openpi_client, neither
+    # of which import lerobot or gym-aloha at runtime. Re-enable as
+    # extras if you reintroduce training workflows.
+    # "gym-aloha>=0.1.1",
     "imageio>=2.36.1",
     "jax[cuda12]==0.5.3",
-    "jaxtyping==0.2.36",
-    "lerobot",
+    "jaxtyping>=0.2.36",
+    # "lerobot",
     "ml_collections==1.0.0",
     "numpy>=1.22.4,<2.0.0",
     "numpydantic>=1.6.6",
@@ -26,7 +32,7 @@ dependencies = [
     "orbax-checkpoint==0.11.13",
     "pillow>=11.0.0",
     "sentencepiece>=0.2.0",
-    "torch==2.7.1",
+    "torch>=2.7.0",
     "tqdm-loggable>=0.2",
     "typing-extensions>=4.12.2",
     "tyro>=0.9.5",
@@ -35,7 +41,7 @@ dependencies = [
     "beartype==0.19.0",
     "chex==0.1.90",
     "treescope>=0.1.7",
-    "transformers==4.53.2",
+    "transformers>=4.53.2",
     "rich>=14.0.0",
     "polars>=1.30.0",
 ]

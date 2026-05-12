@@ -51,6 +51,16 @@ class Args:
     # Record the policy's behavior for debugging.
     record: bool = False
 
+    # When True, every infer() call routes through sample_actions_with_attention
+    # (PyTorch pi0.5 only) and returns per-camera whole-instruction / action
+    # attention heatmaps under the "attention" key. The raw per-layer attention
+    # tensors stay on the server; only aggregated grids cross the wire so the
+    # response payload stays in the few-KB range.
+    record_attention: bool = False
+    # Number of flow-matching denoise steps to use when capturing attention.
+    # Matches the default num_steps used by the offline visualizer.
+    attention_num_flow_steps: int = 10
+
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
 
@@ -76,11 +86,21 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
 }
 
 
-def create_default_policy(env: EnvMode, *, default_prompt: str | None = None) -> _policy.Policy:
+def create_default_policy(
+    env: EnvMode,
+    *,
+    default_prompt: str | None = None,
+    enable_attention_recording: bool = False,
+    attention_num_flow_steps: int = 10,
+) -> _policy.Policy:
     """Create a default policy for the given environment."""
     if checkpoint := DEFAULT_CHECKPOINT.get(env):
         return _policy_config.create_trained_policy(
-            _config.get_config(checkpoint.config), checkpoint.dir, default_prompt=default_prompt
+            _config.get_config(checkpoint.config),
+            checkpoint.dir,
+            default_prompt=default_prompt,
+            enable_attention_recording=enable_attention_recording,
+            attention_num_flow_steps=attention_num_flow_steps,
         )
     raise ValueError(f"Unsupported environment mode: {env}")
 
@@ -90,10 +110,19 @@ def create_policy(args: Args) -> _policy.Policy:
     match args.policy:
         case Checkpoint():
             return _policy_config.create_trained_policy(
-                _config.get_config(args.policy.config), args.policy.dir, default_prompt=args.default_prompt
+                _config.get_config(args.policy.config),
+                args.policy.dir,
+                default_prompt=args.default_prompt,
+                enable_attention_recording=args.record_attention,
+                attention_num_flow_steps=args.attention_num_flow_steps,
             )
         case Default():
-            return create_default_policy(args.env, default_prompt=args.default_prompt)
+            return create_default_policy(
+                args.env,
+                default_prompt=args.default_prompt,
+                enable_attention_recording=args.record_attention,
+                attention_num_flow_steps=args.attention_num_flow_steps,
+            )
 
 
 def main(args: Args) -> None:
