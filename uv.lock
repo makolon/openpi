@@ -2383,7 +2383,7 @@ requires-dist = [
     { name = "dm-tree", specifier = ">=0.1.8" },
     { name = "einops", specifier = ">=0.8.0" },
     { name = "equinox", specifier = ">=0.11.8" },
-    { name = "filelock", specifier = ">=3.16.1" },
+    { name = "filelock", specifier = ">=3.13.1" },
     { name = "flatbuffers", specifier = ">=24.3.25" },
     { name = "flax", specifier = "==0.10.2" },
     { name = "fsspec", extras = ["gcs"], specifier = ">=2024.6.0" },
