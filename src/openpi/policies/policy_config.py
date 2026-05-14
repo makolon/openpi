@@ -22,6 +22,11 @@ def create_trained_policy(
     default_prompt: str | None = None,
     norm_stats: dict[str, transforms.NormStats] | None = None,
     pytorch_device: str | None = None,
+    enable_attention_recording: bool = False,
+    attention_num_flow_steps: int = 10,
+    attention_layers: list[int] | None = None,
+    attention_heads: list[int] | None = None,
+    attention_flow_steps: list[int] | None = None,
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
 
@@ -72,7 +77,7 @@ def create_trained_policy(
         except ImportError:
             pytorch_device = "cpu"
 
-    return _policy.Policy(
+    policy = _policy.Policy(
         model,
         transforms=[
             *repack_transforms.inputs,
@@ -91,4 +96,27 @@ def create_trained_policy(
         metadata=train_config.policy_metadata,
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
+        attention_num_flow_steps=attention_num_flow_steps,
+        attention_layers=attention_layers,
+        attention_heads=attention_heads,
+        attention_flow_steps=attention_flow_steps,
     )
+    if enable_attention_recording:
+        # Always set the flag so every response has an 'attention' field (real
+        # payload when supported, sentinel error string otherwise), so the
+        # client can never silently miss the feature.
+        policy.record_attention = True
+        if policy.attention_supported:
+            logging.info(
+                "Attention recording ENABLED on this policy. Each infer() will route through "
+                "sample_actions_with_attention(num_steps=%d) and return per-camera "
+                "whole_instruction / action heatmaps in the response.",
+                attention_num_flow_steps,
+            )
+        else:
+            logging.warning(
+                "enable_attention_recording=True but attention capture is NOT supported on this policy "
+                "(PyTorch pi0.5 with sample_actions_with_attention is required). Each response WILL "
+                "still contain an 'attention' field, populated with an explanatory error sentinel."
+            )
+    return policy

@@ -95,7 +95,13 @@ class PaliGemmaWithExpertModel(nn.Module):
         inputs_embeds: list[torch.FloatTensor] | None = None,
         use_cache: bool | None = None,
         adarms_cond: list[torch.Tensor] | None = None,
+        attentions_out: list | None = None,
     ):
+        # When ``attentions_out`` is a list, every per-layer self-attention probability
+        # tensor produced by this forward is appended to it (detached). Tensor shape:
+        # (batch, num_heads, q_len, k_len). Default is None -> normal behaviour with no
+        # attention capture (no extra compute / no allocations).
+        output_attentions = attentions_out is not None
         if adarms_cond is None:
             adarms_cond = [None, None]
         if inputs_embeds[1] is None:
@@ -106,20 +112,26 @@ class PaliGemmaWithExpertModel(nn.Module):
                 past_key_values=past_key_values,
                 use_cache=use_cache,
                 adarms_cond=adarms_cond[0] if adarms_cond is not None else None,
+                output_attentions=output_attentions,
             )
             prefix_past_key_values = prefix_output.past_key_values
+            if output_attentions and prefix_output.attentions is not None:
+                attentions_out.extend(a.detach() for a in prefix_output.attentions)
             prefix_output = prefix_output.last_hidden_state
             suffix_output = None
         elif inputs_embeds[0] is None:
-            suffix_output = self.gemma_expert.model.forward(
+            suffix_output_obj = self.gemma_expert.model.forward(
                 inputs_embeds=inputs_embeds[1],
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 past_key_values=past_key_values,
                 use_cache=use_cache,
                 adarms_cond=adarms_cond[1] if adarms_cond is not None else None,
+                output_attentions=output_attentions,
             )
-            suffix_output = suffix_output.last_hidden_state
+            if output_attentions and suffix_output_obj.attentions is not None:
+                attentions_out.extend(a.detach() for a in suffix_output_obj.attentions)
+            suffix_output = suffix_output_obj.last_hidden_state
             prefix_output = None
             prefix_past_key_values = None
         else:
@@ -196,8 +208,9 @@ class PaliGemmaWithExpertModel(nn.Module):
                 batch_size = query_states.shape[0]
                 scaling = self.paligemma.language_model.layers[layer_idx].self_attn.scaling
 
-                # Attention computation
-                att_output, _ = modeling_gemma.eager_attention_forward(
+                # Attention computation. Capture attn_weights when the caller asked for it
+                # (training-time inspection only; sample_actions never goes through this branch).
+                att_output, attn_weights = modeling_gemma.eager_attention_forward(
                     self.paligemma.language_model.layers[layer_idx].self_attn,
                     query_states,
                     key_states,
@@ -205,6 +218,8 @@ class PaliGemmaWithExpertModel(nn.Module):
                     attention_mask,
                     scaling,
                 )
+                if attentions_out is not None:
+                    attentions_out.append(attn_weights.detach())
                 # Get head_dim from the current layer, not from the model
                 head_dim = self.paligemma.language_model.layers[layer_idx].self_attn.head_dim
                 att_output = att_output.reshape(batch_size, -1, 1 * 8 * head_dim)
