@@ -18,7 +18,6 @@ dependencies = [
     "imageio>=2.36.1",
     "jax[cuda12]==0.5.3",
     "jaxtyping>=0.2.36",
-    "lerobot",
     "ml_collections==1.0.0",
     "numpy>=1.22.4,<2.0.0",
     "numpydantic>=1.6.6",
