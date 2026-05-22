@@ -89,18 +89,22 @@ def resize_with_pad_torch(
     resized_height = int(cur_height / ratio)
     resized_width = int(cur_width / ratio)
 
-    # Resize
+    # F.interpolate(mode='bilinear') does not accept uint8; route through float.
+    original_dtype = images.dtype
+    interp_input = images.to(torch.float32) if original_dtype == torch.uint8 else images
     resized_images = F.interpolate(
-        images, size=(resized_height, resized_width), mode=mode, align_corners=False if mode == "bilinear" else None
+        interp_input,
+        size=(resized_height, resized_width),
+        mode=mode,
+        align_corners=False if mode == "bilinear" else None,
     )
 
-    # Handle dtype-specific clipping
-    if images.dtype == torch.uint8:
+    if original_dtype == torch.uint8:
         resized_images = torch.round(resized_images).clamp(0, 255).to(torch.uint8)
-    elif images.dtype == torch.float32:
+    elif original_dtype == torch.float32:
         resized_images = resized_images.clamp(-1.0, 1.0)
     else:
-        raise ValueError(f"Unsupported image dtype: {images.dtype}")
+        raise ValueError(f"Unsupported image dtype: {original_dtype}")
 
     # Calculate padding
     pad_h0, remainder_h = divmod(height - resized_height, 2)

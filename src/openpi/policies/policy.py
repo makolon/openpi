@@ -291,6 +291,68 @@ class Policy(BasePolicy):
                 }
         return outputs
 
+    def batch_infer(self, obs_list: Sequence[dict], *, noise: np.ndarray | None = None) -> list[dict]:
+        """Run inference on multiple observations in one batched forward pass."""
+        if len(obs_list) == 0:
+            return []
+
+        transformed = [self._input_transform(jax.tree.map(lambda x: x, o)) for o in obs_list]
+        bsize = len(transformed)
+
+        if not self._is_pytorch_model:
+            inputs = jax.tree.map(
+                lambda *xs: jnp.stack([jnp.asarray(x) for x in xs], axis=0),
+                *transformed,
+            )
+            self._rng, sample_rng_or_pytorch_device = jax.random.split(self._rng)
+        else:
+            inputs = jax.tree.map(
+                lambda *xs: torch.stack(
+                    [torch.from_numpy(np.array(x)) for x in xs], dim=0
+                ).to(self._pytorch_device),
+                *transformed,
+            )
+            sample_rng_or_pytorch_device = self._pytorch_device
+
+        sample_kwargs = dict(self._sample_kwargs)
+        if noise is not None:
+            if self._is_pytorch_model:
+                noise = torch.from_numpy(noise).to(self._pytorch_device)
+            else:
+                noise = jnp.asarray(noise)
+            if noise.ndim == 2:
+                # (H, D) shared across the batch.
+                if self._is_pytorch_model:
+                    noise = noise[None, ...].expand(bsize, -1, -1).contiguous()
+                else:
+                    noise = jnp.broadcast_to(noise[None, ...], (bsize, *noise.shape))
+            elif noise.shape[0] != bsize:
+                raise ValueError(
+                    f"batch_infer got noise with batch dim {noise.shape[0]} but obs_list has {bsize} samples"
+                )
+            sample_kwargs["noise"] = noise
+
+        observation = _model.Observation.from_dict(inputs)
+
+        start_time = time.monotonic()
+        actions_tensor = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
+        model_time = time.monotonic() - start_time
+
+        outputs_batched = {"state": inputs["state"], "actions": actions_tensor}
+        if self._is_pytorch_model:
+            outputs_batched = jax.tree.map(lambda x: np.asarray(x.detach().cpu()), outputs_batched)
+        else:
+            outputs_batched = jax.tree.map(lambda x: np.asarray(x), outputs_batched)
+
+        avg_ms = model_time * 1000 / bsize
+        results: list[dict] = []
+        for i in range(bsize):
+            per_sample = jax.tree.map(lambda x, _i=i: x[_i], outputs_batched)
+            per_sample = self._output_transform(per_sample)
+            per_sample["policy_timing"] = {"infer_ms": avg_ms}
+            results.append(per_sample)
+        return results
+
     @property
     def metadata(self) -> dict[str, Any]:
         return self._metadata

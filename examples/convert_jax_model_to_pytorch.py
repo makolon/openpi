@@ -522,7 +522,7 @@ def convert_pi0_checkpoint(
     if precision == "float32":
         pi0_model = pi0_model.to(torch.float32)
     elif precision == "bfloat16":
-        pi0_model = pi0_model.to(torch.bfloat16)
+        pi0_model.paligemma_with_expert.to_bfloat16_for_selected_params(precision)
     else:
         raise ValueError(f"Invalid precision: {precision}")
 
