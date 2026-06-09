@@ -18,6 +18,8 @@ ModelType: TypeAlias = _model.ModelType
 def get_polaris_configs():
     # Import here to avoid circular imports.
     from openpi.training.config import AssetsConfig
+    from openpi.training.config import DataConfig
+    from openpi.training.config import LeRobotDROIDDataConfig
     from openpi.training.config import RLDSDroidDataConfig
     from openpi.training.config import SimpleDataConfig
     from openpi.training.config import TrainConfig
@@ -221,5 +223,25 @@ def get_polaris_configs():
                     ],
                 ),
             ),
+        ),
+        #
+        # Fine-tune pi0.5 on a converted TAMP LeRobot DROID dataset
+        # (examples/polaris/convert_hdf5_to_lerobot.py, --action-space joint).
+        # No DROID asset reuse: norm stats are computed fresh from the dataset
+        # because the converted actions are joint *position targets*, not the
+        # joint *velocity* the pretrained DROID stats assume.
+        #
+        TrainConfig(
+            name="pi05_droid_jointpos_lerobot_finetune_polaris",
+            model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+            data=LeRobotDROIDDataConfig(
+                repo_id="local/blockstack_pi05",
+                base_config=DataConfig(prompt_from_task=True),
+            ),
+            weight_loader=weight_loaders.CheckpointWeightLoader(
+                "gs://openpi-assets/checkpoints/pi05_droid/params"
+            ),
+            num_train_steps=20_000,
+            batch_size=32,
         ),
     ]
