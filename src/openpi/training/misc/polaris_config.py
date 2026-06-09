@@ -235,7 +235,7 @@ def get_polaris_configs():
             name="pi05_droid_jointpos_lerobot_finetune_polaris",
             model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
             data=LeRobotDROIDDataConfig(
-                repo_id="local/blockstack_pi05",
+                repo_id="Makolon0321/polaris_pi05",
                 base_config=DataConfig(prompt_from_task=True),
             ),
             weight_loader=weight_loaders.CheckpointWeightLoader(
