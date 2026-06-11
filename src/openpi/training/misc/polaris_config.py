@@ -20,6 +20,7 @@ def get_polaris_configs():
     from openpi.training.config import AssetsConfig
     from openpi.training.config import DataConfig
     from openpi.training.config import LeRobotDROIDDataConfig
+    from openpi.training.config import LeRobotDROIDSteerableDataConfig
     from openpi.training.config import RLDSDroidDataConfig
     from openpi.training.config import SimpleDataConfig
     from openpi.training.config import TrainConfig
@@ -231,16 +232,34 @@ def get_polaris_configs():
         # because the converted actions are joint *position targets*, not the
         # joint *velocity* the pretrained DROID stats assume.
         #
+        # Model config and asset_id mirror `pi05_droid` exactly so the resulting
+        # checkpoint evaluates via create_trained_policy(get_config("pi05_droid"), ckpt)
+        # with no client-side changes. Run compute_norm_stats.py before training;
+        # the stats land under assets/<config>/droid and are saved into the checkpoint.
         TrainConfig(
             name="pi05_droid_jointpos_lerobot_finetune_polaris",
-            model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=16),
+            model=pi0_config.Pi0Config(action_horizon=15, pi05=True),
             data=LeRobotDROIDDataConfig(
                 repo_id="Makolon0321/polaris_pi05",
+                assets=AssetsConfig(asset_id="droid"),
                 base_config=DataConfig(prompt_from_task=True),
             ),
-            weight_loader=weight_loaders.CheckpointWeightLoader(
-                "gs://openpi-assets/checkpoints/pi05_droid/params"
+            weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_droid/params"),
+            num_train_steps=20_000,
+            batch_size=32,
+        ),
+        # Steerable-policy variant (arXiv:2602.13193): identical to the config
+        # above except prompts are randomly swapped for TAMP-derived steering
+        # commands at batch time. Same dataset, same norm stats, same eval path.
+        TrainConfig(
+            name="pi05_droid_steerable_lerobot_finetune_polaris",
+            model=pi0_config.Pi0Config(action_horizon=15, pi05=True),
+            data=LeRobotDROIDSteerableDataConfig(
+                repo_id="Makolon0321/polaris_pi05",
+                assets=AssetsConfig(asset_id="droid"),
+                base_config=DataConfig(prompt_from_task=True),
             ),
+            weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_droid/params"),
             num_train_steps=20_000,
             batch_size=32,
         ),

@@ -6,7 +6,10 @@ polaris_real2sim root package (and its IsaacLab / gsplat dependencies). Only
 written by ``polaris_tamp.utils.hdf5_utils.Hdf5EpisodeRecorder``.
 
 Two action spaces (selected by the converter's ``--action-space`` flag):
-- ``joint``: arm joint positions + gripper; action = recorded joint target.
+- ``joint``: arm joint positions + gripper; action = joint position target
+  minus measured joint position (the DROID velocity-style delta that the
+  zero-shot ``pi05_droid`` eval client integrates back onto the chunk-start
+  joint position) + absolute gripper target.
 - ``ee``: end-effector pose (xyz + 6D rotation) + gripper; action = delta-EE
   pose (xyz delta + relative-rotation 6D) + absolute gripper target.
 """
@@ -23,11 +26,12 @@ import h5py
 import imageio.v2 as imageio
 import numpy as np
 
-# DROID view numbering does not match by name: sim ``external_cam_2`` is DROID
-# view 1, sim ``external_cam`` is DROID view 2, hence exterior_1 -> external_cam_2.
+# exterior_1 must be the camera the zero-shot eval client sends as
+# ``exterior_image_1_left`` (sim ``external_cam``), so SFT checkpoints stay
+# plug-compatible with the unchanged ``OpenPi05FrankaDroidClient``.
 DEFAULT_SPLAT_ROLES: dict[str, str] = {
-    "exterior_1": "splat.external_cam_2",
-    "exterior_2": "splat.external_cam",
+    "exterior_1": "splat.external_cam",
+    "exterior_2": "splat.external_cam_2",
     "wrist": "splat.wrist_cam",
 }
 
@@ -208,7 +212,9 @@ def joint_state(reader: Hdf5EpisodeReader, *, normalize_gripper_value: bool = Tr
 
 
 def joint_action(reader: Hdf5EpisodeReader, *, normalize_gripper_value: bool = True) -> np.ndarray:
+    """``(T, 8)``: joint target minus measured joint position + absolute gripper."""
     action = reader.action_full.copy()
+    action[:, :-1] -= reader.arm_joint_position
     action[:, -1] = _gripper_column(reader, action[:, -1], normalize=normalize_gripper_value)
     return action.astype(np.float32)
 

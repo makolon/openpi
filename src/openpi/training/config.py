@@ -24,6 +24,7 @@ import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
 import openpi.training.misc.polaris_config as polaris_config
+import openpi.training.misc.polaris_steering as polaris_steering
 import openpi.training.misc.roboarena_config as roboarena_config
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
@@ -459,6 +460,41 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotDROIDSteerableDataConfig(LeRobotDROIDDataConfig):
+    """LeRobot DROID config with steerable-policy prompt sampling (arXiv:2602.13193).
+
+    Prepends a transform that swaps the episode-level prompt for a randomly
+    sampled TAMP-derived steering command. Training-only: the inference-side
+    contract is identical to LeRobotDROIDDataConfig.
+    """
+
+    # None resolves to <HF_LEROBOT_HOME>/<repo_id>/steering_annotations.json.
+    steering_annotations_path: str | None = None
+    steer_prob: float = 0.5
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # Heavy import; deliberately not at module scope (config.py is imported everywhere).
+        from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME  # noqa: PLC0415
+
+        base = super().create(assets_dirs, model_config)
+        annotations_path = self.steering_annotations_path or str(
+            HF_LEROBOT_HOME / self.repo_id / "steering_annotations.json"
+        )
+        sampler = polaris_steering.SteeringPromptSampler(
+            segments=polaris_steering.load_steering_segments(annotations_path),
+            steer_prob=self.steer_prob,
+        )
+        return dataclasses.replace(
+            base,
+            repack_transforms=_transforms.Group(
+                inputs=[sampler, *base.repack_transforms.inputs],
+                outputs=base.repack_transforms.outputs,
+            ),
         )
 
 

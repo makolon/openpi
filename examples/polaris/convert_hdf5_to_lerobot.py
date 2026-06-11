@@ -11,14 +11,18 @@ reader. Run inside the openpi env, fully independent of IsaacLab:
         --repo-id local/my_droid_dataset --action-space joint
 
 Proprio is always joint-space (``joint_position`` 7 + ``gripper_position`` 1,
-the DROID convention). ``--action-space joint`` stores the recorded joint
-position target (8-D); ``ee`` stores delta-EE pose actions (10-D, needs a custom
-``*Inputs/*Outputs`` transform on the openpi side).
+the DROID convention). ``--action-space joint`` stores joint target minus
+measured joint position (8-D, the DROID velocity-style delta that the
+zero-shot eval client integrates back), so a checkpoint fine-tuned on this
+dataset evaluates through the unchanged ``OpenPi05FrankaDroid`` client.
+``ee`` stores delta-EE pose actions (10-D, needs a custom ``*Inputs/*Outputs``
+transform on the openpi side).
 
-Then finetune in this same env via ``uv run scripts/train.py <config>``. Reusing
-the pretrained ``asset_id="droid"`` norm stats is NOT valid here (pi05-droid was
-pretrained on joint *velocity* actions, this stores joint *position targets*) --
-always run ``uv run scripts/compute_norm_stats.py --config-name <name>``.
+Then finetune in this same env via ``uv run scripts/train.py <config>``. The
+delta-action distribution differs from the rad/s velocities pi05-droid was
+pretrained on, so always run
+``uv run scripts/compute_norm_stats.py --config-name <name>`` first; the stats
+are written under ``asset_id="droid"`` and travel inside the checkpoint.
 """
 
 from __future__ import annotations
